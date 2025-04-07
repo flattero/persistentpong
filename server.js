@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 const server = http.createServer(app);
@@ -9,20 +10,44 @@ const io = socketIo(server);
 const PORT = process.env.PORT || 3000;
 const FPS = 60;
 
+// Upstash credentials
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
 const canvas = { width: 800, height: 500 };
 const paddle = { width: 10, height: 100 };
 const ballSize = 10;
 
-const game = {
+let game = {
   startTime: Date.now(),
-  left: { y: canvas.height / 2 - paddle.height / 2, score: 0 },
-  right: { y: canvas.height / 2 - paddle.height / 2, score: 0 },
-  ball: {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
-    vx: 5,
-    vy: 5,
-    speed: 5
+  left: { y: 200, score: 0 },
+  right: { y: 200, score: 0 },
+  ball: { x: 400, y: 250, vx: 5, vy: 5, speed: 5 }
+};
+
+const saveState = async () => {
+  await fetch(`${REDIS_URL}/set/persistentpong`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${REDIS_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ value: JSON.stringify(game) })
+  });
+};
+
+const loadState = async () => {
+  const res = await fetch(`${REDIS_URL}/get/persistentpong`, {
+    headers: {
+      Authorization: `Bearer ${REDIS_TOKEN}`
+    }
+  });
+  const data = await res.json();
+  if (data.result) {
+    game = JSON.parse(data.result);
+    console.log("✅ Game state loaded from Redis.");
+  } else {
+    console.log("ℹ️ No saved state found. Starting fresh.");
   }
 };
 
@@ -73,12 +98,16 @@ function resetBall(direction) {
   game.ball.vy = 5;
 }
 
-setInterval(update, 1000 / FPS);
+// Start server
+(async () => {
+  await loadState();
+  setInterval(update, 1000 / FPS);
+  setInterval(saveState, 1000); // save once per second
+})();
 
 io.on('connection', socket => {
   socket.emit('state', game);
 });
 
 app.use(express.static('public'));
-
-server.listen(PORT, () => console.log(`🌍 PersistentPong server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🌍 PersistentPong running on port ${PORT}`));
