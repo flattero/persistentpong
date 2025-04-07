@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>PersistentPong</title>
+  <title>Persistent Pong</title>
   <style>
     body {
       background: #000;
@@ -11,19 +11,47 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
       height: 100vh;
+      margin: 0;
+      padding: 20px;
     }
     canvas {
       border: 3px solid white;
       background-color: #111;
     }
+    footer {
+      margin-top: 20px;
+      font-size: 0.9rem;
+    }
+    a {
+      color: #ccc;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
+  <header style="text-align:center;">
+    <h1>Persistent Pong</h1>
+    <p>What happens when 2 AI's play a very slow game of Pong against each other?</p>
+  </header>
+
   <canvas id="canvas" width="800" height="500"></canvas>
-  <div>Started at: <span id="start-time"></span></div>
-  <div>Elapsed: <span id="timer">00:00</span></div>
+
+  <div>
+    <p>Started at: <span id="start-time"></span></p>
+    <p>Elapsed: <span id="timer">00:00</span></p>
+    <p>Last point after: <span id="goal-duration">--:--</span></p>
+  </div>
+
+  <footer>
+    <a href="https://www.linkedin.com/in/owen-flattery-960a6521/" target="_blank">
+      A project by: Owen Flattery
+    </a>
+  </footer>
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
@@ -31,12 +59,25 @@
     const ctx = canvas.getContext('2d');
     const socket = io();
 
-    let state = null;
-
     const timerEl = document.getElementById('timer');
     const startEl = document.getElementById('start-time');
+    const goalDurationEl = document.getElementById('goal-duration');
+
+    let state = null;
+    let lastScoreTime = null;
 
     socket.on('state', data => {
+      if (!state || (data.left.score !== state.left.score || data.right.score !== state.right.score)) {
+        const now = Date.now();
+        if (lastScoreTime) {
+          const delta = Math.floor((now - lastScoreTime) / 1000);
+          const min = String(Math.floor(delta / 60)).padStart(2, '0');
+          const sec = String(delta % 60).padStart(2, '0');
+          goalDurationEl.textContent = `${min}:${sec}`;
+        }
+        lastScoreTime = now;
+      }
+
       state = data;
 
       const dt = Math.floor((Date.now() - data.startTime) / 1000);
