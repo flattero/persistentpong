@@ -10,6 +10,7 @@ const io = socketIo(server);
 const PORT = process.env.PORT || 3000;
 const FPS = 60;
 
+// Upstash Redis config
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
@@ -17,8 +18,9 @@ const canvas = { width: 800, height: 500 };
 const paddle = { width: 10, height: 100 };
 const ballSize = 10;
 
+// Default game state (will be replaced if Redis data exists)
 let game = {
-  startTime: Date.now(),
+  startTime: null, // <-- will be set in loadState
   left: { y: 200, score: 0 },
   right: { y: 200, score: 0 },
   ball: { x: 400, y: 250, vx: 5, vy: 5, speed: 5 }
@@ -47,18 +49,22 @@ const loadState = async () => {
     const data = await res.json();
     if (data.result) {
       game = JSON.parse(data.result);
-      game.startTime = Number(game.startTime); // ensure it's a number
+      game.startTime = Number(game.startTime); // Ensure it’s numeric
       console.log("✅ Game state loaded from Redis.");
     } else {
-      console.log("ℹ️ No saved state found. Starting fresh.");
+      // No saved state — start fresh
+      game.startTime = Date.now();
+      console.log("ℹ️ No saved game found. Starting new game.");
     }
   } catch (err) {
     console.error("❌ Failed to load from Redis:", err);
+    game.startTime = Date.now(); // Fail-safe fallback
   }
 };
 
 function update() {
   const { ball, left, right } = game;
+
   ball.x += ball.vx;
   ball.y += ball.vy;
 
@@ -101,7 +107,7 @@ function resetBall(direction) {
   game.ball.x = canvas.width / 2;
   game.ball.y = canvas.height / 2;
   game.ball.vx = direction * game.ball.speed;
-  game.ball.vy = 5;
+  game.ball.vy = (Math.random() > 0.5 ? 1 : -1) * game.ball.speed;
 }
 
 // START
@@ -111,21 +117,18 @@ function resetBall(direction) {
   setInterval(saveState, 1000);
 })();
 
-// CLIENT CONNECTION HANDLER
+// Client connections
 io.on('connection', socket => {
   console.log('👋 New client connected');
-
-  // Immediately send game state
   socket.emit('state', game);
 
-  // Optional: periodically re-send (safety net)
   const interval = setInterval(() => {
     socket.emit('state', game);
   }, 1000);
 
   socket.on('disconnect', () => {
-    console.log('❌ Client disconnected');
     clearInterval(interval);
+    console.log('❌ Client disconnected');
   });
 });
 
