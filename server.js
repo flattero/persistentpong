@@ -10,7 +10,6 @@ const io = socketIo(server);
 const PORT = process.env.PORT || 3000;
 const FPS = 60;
 
-// Upstash Redis config
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
@@ -18,9 +17,8 @@ const canvas = { width: 800, height: 500 };
 const paddle = { width: 10, height: 100 };
 const ballSize = 10;
 
-// Default game state (will be replaced if Redis data exists)
 let game = {
-  startTime: null, // <-- will be set in loadState
+  startTime: Date.now(),
   left: { y: 200, score: 0 },
   right: { y: 200, score: 0 },
   ball: { x: 400, y: 250, vx: 5, vy: 5, speed: 5 }
@@ -37,7 +35,7 @@ const saveState = async () => {
       body: JSON.stringify({ value: JSON.stringify(game) })
     });
   } catch (err) {
-    console.error("❌ Failed to save to Redis:", err);
+    console.error('❌ Failed to save to Redis:', err);
   }
 };
 
@@ -48,17 +46,31 @@ const loadState = async () => {
     });
     const data = await res.json();
     if (data.result) {
-      game = JSON.parse(data.result);
-      game.startTime = Number(game.startTime); // Ensure it’s numeric
-      console.log("✅ Game state loaded from Redis.");
+      try {
+        const loadedGame = JSON.parse(data.result);
+        if (
+          loadedGame.ball &&
+          loadedGame.left &&
+          loadedGame.right &&
+          loadedGame.startTime
+        ) {
+          game = loadedGame;
+          game.startTime = Number(game.startTime);
+          console.log('✅ Game state loaded from Redis.');
+        } else {
+          throw new Error('Incomplete game state');
+        }
+      } catch (err) {
+        console.warn('⚠️ Invalid saved game. Starting fresh.');
+        game.startTime = Date.now();
+      }
     } else {
-      // No saved state — start fresh
+      console.log('ℹ️ No saved state found. Starting fresh.');
       game.startTime = Date.now();
-      console.log("ℹ️ No saved game found. Starting new game.");
     }
   } catch (err) {
-    console.error("❌ Failed to load from Redis:", err);
-    game.startTime = Date.now(); // Fail-safe fallback
+    console.error('❌ Failed to load from Redis:', err);
+    game.startTime = Date.now();
   }
 };
 
@@ -110,14 +122,12 @@ function resetBall(direction) {
   game.ball.vy = (Math.random() > 0.5 ? 1 : -1) * game.ball.speed;
 }
 
-// START
 (async () => {
   await loadState();
   setInterval(update, 1000 / FPS);
   setInterval(saveState, 1000);
 })();
 
-// Client connections
 io.on('connection', socket => {
   console.log('👋 New client connected');
   socket.emit('state', game);
