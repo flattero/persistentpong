@@ -10,7 +10,6 @@ const io = socketIo(server);
 const PORT = process.env.PORT || 3000;
 const FPS = 60;
 
-// Upstash credentials
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
@@ -26,28 +25,35 @@ let game = {
 };
 
 const saveState = async () => {
-  await fetch(`${REDIS_URL}/set/persistentpong`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${REDIS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ value: JSON.stringify(game) })
-  });
+  try {
+    await fetch(`${REDIS_URL}/set/persistentpong`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${REDIS_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ value: JSON.stringify(game) })
+    });
+  } catch (err) {
+    console.error("❌ Failed to save to Redis:", err);
+  }
 };
 
 const loadState = async () => {
-  const res = await fetch(`${REDIS_URL}/get/persistentpong`, {
-    headers: {
-      Authorization: `Bearer ${REDIS_TOKEN}`
+  try {
+    const res = await fetch(`${REDIS_URL}/get/persistentpong`, {
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}` }
+    });
+    const data = await res.json();
+    if (data.result) {
+      game = JSON.parse(data.result);
+      game.startTime = Number(game.startTime); // ensure it's a number
+      console.log("✅ Game state loaded from Redis.");
+    } else {
+      console.log("ℹ️ No saved state found. Starting fresh.");
     }
-  });
-  const data = await res.json();
-  if (data.result) {
-    game = JSON.parse(data.result);
-    console.log("✅ Game state loaded from Redis.");
-  } else {
-    console.log("ℹ️ No saved state found. Starting fresh.");
+  } catch (err) {
+    console.error("❌ Failed to load from Redis:", err);
   }
 };
 
@@ -98,15 +104,29 @@ function resetBall(direction) {
   game.ball.vy = 5;
 }
 
-// Start server
+// START
 (async () => {
   await loadState();
   setInterval(update, 1000 / FPS);
-  setInterval(saveState, 1000); // save once per second
+  setInterval(saveState, 1000);
 })();
 
+// CLIENT CONNECTION HANDLER
 io.on('connection', socket => {
+  console.log('👋 New client connected');
+
+  // Immediately send game state
   socket.emit('state', game);
+
+  // Optional: periodically re-send (safety net)
+  const interval = setInterval(() => {
+    socket.emit('state', game);
+  }, 1000);
+
+  socket.on('disconnect', () => {
+    console.log('❌ Client disconnected');
+    clearInterval(interval);
+  });
 });
 
 app.use(express.static('public'));
